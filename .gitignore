@@ -19,3 +19,9 @@
 
 bin/
 gen/
+/.idea/*
+!/.idea/codeStyleSettings.xml
+*.iml
+.gradle
+local.properties
+build
