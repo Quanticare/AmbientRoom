@@ -21,6 +21,7 @@
 package pro.apus.bleconnect;
 
 import android.app.Notification;
+import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.bluetooth.BluetoothAdapter;
@@ -57,6 +58,8 @@ public class BluetoothLeService extends Service {
 	private String mBluetoothDeviceAddress;
 	private BluetoothGatt mBluetoothGatt;
 	private int mConnectionState = STATE_DISCONNECTED;
+    private PendingIntent pendingIntent;
+    private NotificationManager nm;
 
 	private static final int STATE_DISCONNECTED = 0;
 	private static final int STATE_CONNECTING = 1;
@@ -73,15 +76,20 @@ public class BluetoothLeService extends Service {
 
 	 @Override
      public int onStartCommand(Intent intent, int flags, int startId) {
-             
-             Notification notification = new Notification(R.drawable.ic_launcher, "BLE Logger",
-                             System.currentTimeMillis());
-             Intent notificationIntent = new Intent(this, BluetoothLeService.class);
-             PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, 0);
-             notification.setLatestEventInfo(this, "BLE","BLE Logger", pendingIntent);
-             this.startForeground(1, notification);
-            
-             return Service.START_NOT_STICKY;
+         nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+
+         Notification notification = new Notification.Builder(this)
+             .setContentTitle("BLE HRM")
+             .setContentText("BLE Logger")
+             .setSmallIcon(R.drawable.ic_launcher)
+             .setWhen(System.currentTimeMillis())
+             .build();
+         //Intent notificationIntent = new Intent(this, BluetoothLeService.class);
+         //pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, 0);
+         //notification.setLatestEventInfo(this, "BLE","BLE Logger", pendingIntent);
+         this.startForeground(1, notification);
+         //nm.notify(1, notification);
+         return Service.START_NOT_STICKY;
      }
 	 
 	// Implements callback methods for GATT events that the app cares about. For
@@ -106,6 +114,7 @@ public class BluetoothLeService extends Service {
 				mConnectionState = STATE_DISCONNECTED;
 				Log.i(TAG, "Disconnected from GATT server.");
 				broadcastUpdate(intentAction);
+                nm.cancel(1);
 			}
 		}
 
@@ -171,6 +180,13 @@ public class BluetoothLeService extends Service {
 						+ stringBuilder.toString());
 			}
 		}
+        Notification notification = new Notification.Builder(this)
+                .setContentTitle("BLE HRM")
+                .setContentText(intent.getStringExtra(EXTRA_DATA))
+                .setSmallIcon(R.drawable.ic_launcher)
+                .setWhen(System.currentTimeMillis())
+                .build();
+        nm.notify(1, notification);
 		sendBroadcast(intent);
 	}
 
@@ -284,6 +300,7 @@ public class BluetoothLeService extends Service {
 			return;
 		}
 		mBluetoothGatt.disconnect();
+        //nm.cancel(1);
 	}
 
 	/**
@@ -296,6 +313,7 @@ public class BluetoothLeService extends Service {
 		}
 		mBluetoothGatt.close();
 		mBluetoothGatt = null;
+        //nm.cancel(1);
 	}
 
 	/**
