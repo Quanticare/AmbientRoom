@@ -18,7 +18,8 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_margin="10dp"
-    android:orientation="vertical" >
+    android:orientation="vertical"
+    android:keepScreenOn="true" >
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -55,6 +56,30 @@
             android:src="@android:drawable/ic_menu_save" 
             android:contentDescription="@string/menu_dropbox"
             android:visibility="gone" />
+
+    </LinearLayout>
+     <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_margin="10dp"
+        android:orientation="horizontal" >
+
+        <TextView
+            android:id="@+id/r2r_value"
+            android:layout_width="140dip"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:text="@string/no_data"
+            android:textSize="30sp" />
+        
+        <TextView
+            android:id="@+id/rms_value"
+            android:layout_width="140dip"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:text="@string/no_data"
+            android:textSize="30sp" />
+
 
     </LinearLayout>
 

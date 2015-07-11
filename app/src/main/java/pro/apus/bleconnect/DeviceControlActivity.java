@@ -40,6 +40,7 @@ import android.os.Bundle;
 
 import com.dropbox.client2.DropboxAPI.Entry;
 
+import android.os.AsyncTask;
 import android.os.Environment;
 import android.os.IBinder;
 import android.util.Log;
@@ -53,13 +54,20 @@ import android.widget.LinearLayout;
 //import android.widget.SimpleExpandableListAdapter;
 import android.widget.TextView;
 
+import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.MalformedURLException;
+import java.net.ProtocolException;
 import java.net.URI;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
@@ -106,6 +114,10 @@ public class DeviceControlActivity extends Activity {
 
 	// Database
 	private EventsDataSource datasource;
+	private final int MAX_R2R_SERIES_SIZE = 60;	
+	private ArrayList<Integer> mR2RSeries;
+	private boolean isStress;
+	private int mCntAfterTrigger = 40;
 	
 	// Dropbox
 	private DropboxAPI<AndroidAuthSession> mDBApi;
@@ -122,6 +134,8 @@ public class DeviceControlActivity extends Activity {
 	public static boolean currentlyVisible;
 	private boolean logging = false;
 	private TextView mDataField;
+	private TextView mR2RField;
+	private TextView mRmsField;
 	private String mDeviceName;
 	private String mDeviceAddress;
 	private ImageButton mButtonStart;
@@ -249,7 +263,7 @@ public class DeviceControlActivity extends Activity {
 				// mButtonStop.setVisibility(View.VISIBLE);
 			} else if (BluetoothLeService.ACTION_DATA_AVAILABLE.equals(action)) {
 				displayData(intent
-						.getStringExtra(BluetoothLeService.EXTRA_DATA));
+						.getIntegerArrayListExtra(BluetoothLeService.EXTRA_DATA));
 			}
 		}
 	};
@@ -257,6 +271,8 @@ public class DeviceControlActivity extends Activity {
 	private void clearUI() {
 		// mGattServicesList.setAdapter((SimpleExpandableListAdapter) null);
 		mDataField.setText(R.string.no_data);
+		mR2RField.setText(R.string.no_data);
+		mRmsField.setText(R.string.no_data);
 	}
 
 	@Override
@@ -277,12 +293,17 @@ public class DeviceControlActivity extends Activity {
         datasource = new EventsDataSource(this);
         datasource.open();
         
+        // Create a list to store r2r values
+        mR2RSeries = new ArrayList<Integer>();
+        
 		// We create a new AuthSession so that we can use the Dropbox API.
 		AndroidAuthSession session = buildSession();
 		mDBApi = new DropboxAPI<AndroidAuthSession>(session);
 
 		mDataField = (TextView) findViewById(R.id.data_value);
-
+		mR2RField = (TextView) findViewById(R.id.r2r_value);
+		mRmsField = (TextView) findViewById(R.id.rms_value);
+		
 		mButtonSend = (ImageButton) findViewById(R.id.btnSend);
 		mButtonSend.setOnClickListener(new View.OnClickListener() {
 			public void onClick(View v) {
@@ -332,7 +353,8 @@ public class DeviceControlActivity extends Activity {
 		} else {
 			mChart.repaint();
 		}
-
+		
+		new HTTPLifxAsyncTask(64, 64, 64, 10).execute();
 	}
 
 	@Override
@@ -469,14 +491,15 @@ public class DeviceControlActivity extends Activity {
 
 	int x = 0;
 
-	private void displayData(String data) {
+	private void displayData(ArrayList<Integer> data) {
 		try {
 			if (data != null) {
 
 				long time = (new Date()).getTime();
-				int dataElement = Integer.parseInt(data);
+				//int dataElement = Integer.parseInt(data);
+				int dataElement = data.get(0);
 				mCurrentSeries.add(time, dataElement);
-				appendLog((new Date()).toString() + "," + data);
+				appendLog((new Date()).toString() + "," + dataElement);
 				//datasource.createEvent(1, time, dataElement);
 				// Storing last 600 only - should average... 
 				while (mCurrentSeries.getItemCount() > 60*10) {
@@ -484,8 +507,49 @@ public class DeviceControlActivity extends Activity {
 				}
 				
 				if (currentlyVisible) {
-					mDataField.setText("Pulse: " + data);
-
+					mDataField.setText("Pulse: " + dataElement);
+					if(data.size() > 1) {
+						int r2rValue = (int)((data.get(1) / 1024.0) * 1000 + 0.5);
+						mR2RField.setText("R2R: " + r2rValue);
+						mR2RSeries.add(Integer.valueOf(r2rValue));
+						
+						// Calculate root mean squares
+						if(mR2RSeries.size() > 2) {
+							double aggVal = 0;
+							int preVal = mR2RSeries.get(0);
+							for(int i = 1; i < mR2RSeries.size(); i++) {
+								int nextVal = mR2RSeries.get(i);
+								aggVal += (nextVal - preVal) * (nextVal - preVal);
+								preVal = nextVal;
+							}
+							Log.i(TAG, "(" + mR2RSeries.size() + ", " + r2rValue + ") -> " + aggVal);
+							aggVal /= (mR2RSeries.size() - 1);
+							aggVal = Math.sqrt(aggVal);
+							mRmsField.setText("RMS: " + String.format("%.2f", aggVal));
+							
+							if(aggVal < 40 && !isStress && mCntAfterTrigger >= 40 && mR2RSeries.size() > MAX_R2R_SERIES_SIZE/2) {
+								new HTTPLifxAsyncTask(0, 64, 0, 10).execute();
+								mCntAfterTrigger = 0;
+								isStress = true;
+							} else if (aggVal >= 40 && isStress && mCntAfterTrigger >= 40 && mR2RSeries.size() > MAX_R2R_SERIES_SIZE/2){
+								new HTTPLifxAsyncTask(64, 64, 64, 10).execute();
+								mCntAfterTrigger = 0;
+								isStress = false;
+							}
+							
+							mCntAfterTrigger++;
+							
+						}
+						
+						if(mR2RSeries.size() > MAX_R2R_SERIES_SIZE) {
+							mR2RSeries.remove(0);
+						}
+						
+//						if(mR2RSeries.size() > 2 * MAX_R2R_SERIES_SIZE) {
+//							mR2RSeries.subList(0, MAX_R2R_SERIES_SIZE).clear();
+//						}
+					}
+					
 					mRenderer.setYAxisMin(0);
 					mRenderer.setYAxisMax(mCurrentSeries.getMaxY() + 20);
 
@@ -505,7 +569,7 @@ public class DeviceControlActivity extends Activity {
 				} 
 			}
 		} catch (Exception e) {
-			Log.e(TAG, "Exception while parsing: " + data);
+			Log.e(TAG, "Exception while parsing: " + data.get(0));
 		}
 	}
 
@@ -663,5 +727,66 @@ public class DeviceControlActivity extends Activity {
 				mNotifyCharacteristic, false);
 		invalidateOptionsMenu();
 		logging = false;
+	}
+	
+	class HTTPLifxAsyncTask extends AsyncTask<Void, Void, Void> {
+
+		private String endPoint = "https://api.lifx.com/v1beta1/lights/all/color?";
+		private String authToken = System.getProperty("LIFX_AUTH_TOKEN");
+		
+		private String query;
+		
+		public HTTPLifxAsyncTask(int red, int green, int blue, float duration) {
+			red &= 0xff;
+			green &= 0xff;
+			blue &= 0xff;
+			
+			StringBuilder sb = new StringBuilder();
+			sb.append("color=");
+			sb.append("rgb:" + String.format("%d,%d,%d", red, green, blue));
+			sb.append("&");
+			sb.append("duration="+duration);
+			query = sb.toString();
+		}
+		
+		@Override
+		protected Void doInBackground(Void... params) {
+			try {
+				URL url = new URL(endPoint + query);
+				HttpURLConnection con = (HttpURLConnection) url.openConnection();
+				Log.i(TAG, "URL: " + endPoint + query);
+				
+				con.setRequestMethod("PUT");
+				con.setRequestProperty("Authorization", "Bearer " + authToken);
+				con.setConnectTimeout(5000);
+				
+				if(con.getResponseCode() != HttpURLConnection.HTTP_OK) {
+					Log.e(TAG, con.getResponseCode() + ": " + con.getResponseMessage());
+				}
+				
+				String response = readStream(con.getInputStream());
+				Log.i(TAG, "Response: " + response);
+			} catch (MalformedURLException e) {
+				Log.e(TAG, e.getMessage());
+			} catch (IOException e) {
+				Log.e(TAG, e.getMessage());
+			}
+			
+			
+			return null;
+		}
+		
+		public String readStream(InputStream is) throws IOException {
+			BufferedReader in = new BufferedReader(
+				new InputStreamReader(is)
+			);
+			String line;
+			StringBuffer sb = new StringBuffer();
+			while ((line = in.readLine()) != null) {
+				sb.append(line);
+			}
+			return sb.toString();		
+		}
+		
 	}
 }

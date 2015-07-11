@@ -38,6 +38,7 @@ import android.os.Binder;
 import android.os.IBinder;
 import android.util.Log;
 
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.UUID;
@@ -142,6 +143,7 @@ public class BluetoothLeService extends Service {
 			final BluetoothGattCharacteristic characteristic) {
 		final Intent intent = new Intent(action);
 
+		ArrayList<Integer> extra_data = new ArrayList<Integer>();
 		// This is special handling for the Heart Rate Measurement profile. Data
 		// parsing is
 		// carried out as per profile specifications:
@@ -149,16 +151,34 @@ public class BluetoothLeService extends Service {
 		if (UUID_HEART_RATE_MEASUREMENT.equals(characteristic.getUuid())) {
 			int flag = characteristic.getProperties();
 			int format = -1;
+			int pos=1, offset;
 			if ((flag & 0x01) != 0) {
 				format = BluetoothGattCharacteristic.FORMAT_UINT16;
 				Log.d(TAG, "Heart rate format UINT16.");
+				offset=2;
 			} else {
 				format = BluetoothGattCharacteristic.FORMAT_UINT8;
 				Log.d(TAG, "Heart rate format UINT8.");
+				offset=1;
 			}
-			final int heartRate = characteristic.getIntValue(format, 1);
+			final int heartRate = characteristic.getIntValue(format, pos);
 			Log.d(TAG, String.format("Received heart rate: %d", heartRate));
-			intent.putExtra(EXTRA_DATA, String.valueOf(heartRate));
+			//intent.putExtra(EXTRA_DATA, String.valueOf(heartRate));
+			extra_data.add(heartRate);
+			pos += offset;
+			
+			if ((flag & 0x08) != 0)
+				pos += 2;
+			
+			int r2rValue;
+			if ((flag & 0x10) != 0) {
+				format = BluetoothGattCharacteristic.FORMAT_UINT16;
+				r2rValue = characteristic.getIntValue(format, pos);
+				Log.d(TAG, String.format("Received R2R value: %d", r2rValue));
+				extra_data.add(r2rValue);
+			}
+			intent.putIntegerArrayListExtra(EXTRA_DATA, extra_data);
+			
 		} else {
 			// For all other profiles, writes the data formatted in HEX.
 			final byte[] data = characteristic.getValue();
@@ -167,8 +187,8 @@ public class BluetoothLeService extends Service {
 						data.length);
 				for (byte byteChar : data)
 					stringBuilder.append(String.format("%02X ", byteChar));
-				intent.putExtra(EXTRA_DATA, new String(data) + "\n"
-						+ stringBuilder.toString());
+				//intent.putExtra(EXTRA_DATA, new String(data) + "\n"
+				//		+ stringBuilder.toString());
 			}
 		}
 		sendBroadcast(intent);
