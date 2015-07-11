@@ -24,6 +24,14 @@ android {
     }
 }
 
+repositories {
+    //mavenCentral()
+    flatDir {
+        dirs 'libs'
+    }
+}
+
+
 dependencies {
     compile files('libs/achartengine-1.1.0.jar')
     compile files('libs/commons-logging-1.1.1.jar')
@@ -32,4 +40,8 @@ dependencies {
     compile files('libs/httpcore-4.0.1.jar')
     compile files('libs/httpmime-4.0.3.jar')
     compile files('libs/json_simple-1.1.jar')
+    compile 'com.spotify.sdk:spotify-auth:1.0.0-beta10@aar'
+    compile 'com.spotify.sdk:spotify-player:1.0.0-beta10@aar'
+
+
 }

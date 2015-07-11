@@ -90,6 +90,16 @@ import com.dropbox.client2.session.AppKeyPair;
 import com.dropbox.client2.session.Session.AccessType;
 import com.dropbox.client2.session.TokenPair;
 
+import com.spotify.sdk.android.player.Spotify;
+import com.spotify.sdk.android.authentication.AuthenticationClient;
+import com.spotify.sdk.android.authentication.AuthenticationRequest;
+import com.spotify.sdk.android.authentication.AuthenticationResponse;
+import com.spotify.sdk.android.player.Config;
+import com.spotify.sdk.android.player.ConnectionStateCallback;
+import com.spotify.sdk.android.player.Player;
+import com.spotify.sdk.android.player.PlayerNotificationCallback;
+import com.spotify.sdk.android.player.PlayerState;
+
 import pro.apus.heartrate.R;
 
 /**
@@ -98,9 +108,16 @@ import pro.apus.heartrate.R;
  * device. The Activity communicates with {@code BluetoothLeService}, which in
  * turn interacts with the Bluetooth LE API.
  */
-public class DeviceControlActivity extends Activity {
+public class DeviceControlActivity extends Activity implements
+		PlayerNotificationCallback, ConnectionStateCallback {
 	private final static String TAG = DeviceControlActivity.class
 			.getSimpleName();
+
+	private static final String CLIENT_ID = System.getProperty("SPOTIFY_CLIENT_ID");
+	private static final String REDIRECT_URI = "ambient://room";
+
+	private final int REQUEST_CODE = 1001;
+	private Player mPlayer;
 
 	// BLE stuff
 	public static final String EXTRAS_DEVICE_NAME = "DEVICE_NAME";
@@ -355,6 +372,14 @@ public class DeviceControlActivity extends Activity {
 		}
 		
 		new HTTPLifxAsyncTask(64, 64, 64, 10).execute();
+
+		//Spotify authentication
+		AuthenticationRequest.Builder builder =
+				new AuthenticationRequest.Builder(CLIENT_ID, AuthenticationResponse.Type.TOKEN, REDIRECT_URI);
+		builder.setScopes(new String[]{"user-read-private", "streaming"});
+		AuthenticationRequest request = builder.build();
+
+		AuthenticationClient.openLoginActivity(this, REQUEST_CODE, request);
 	}
 
 	@Override
@@ -412,10 +437,82 @@ public class DeviceControlActivity extends Activity {
 
 	@Override
 	protected void onDestroy() {
+		Spotify.destroyPlayer(this);
 		super.onDestroy();
 		currentlyVisible = false;
 		unbindService(mServiceConnection);
 		// mBluetoothLeService = null;
+	}
+
+	@Override
+	protected void onActivityResult(int requestCode, int resultCode, Intent intent) {
+		super.onActivityResult(requestCode, resultCode, intent);
+
+		// Check if result comes from the correct activity
+		if (requestCode == REQUEST_CODE) {
+			AuthenticationResponse response = AuthenticationClient.getResponse(resultCode, intent);
+			if (response.getType() == AuthenticationResponse.Type.TOKEN) {
+				Config playerConfig = new Config(this, response.getAccessToken(), CLIENT_ID);
+				Log.i(TAG, "TOKEN: " + response.getAccessToken());
+				mPlayer = Spotify.getPlayer(playerConfig, this, new Player.InitializationObserver() {
+					@Override
+					public void onInitialized(Player player) {
+						mPlayer.addConnectionStateCallback(DeviceControlActivity.this);
+						mPlayer.addPlayerNotificationCallback(DeviceControlActivity.this);
+					}
+
+					@Override
+					public void onError(Throwable throwable) {
+						Log.e(TAG, "Could not initialize player: " + throwable.getMessage());
+					}
+				});
+			}
+		}
+	}
+
+	@Override
+	public void onLoggedIn() {
+		Log.d(TAG, "User logged in");
+	}
+
+	@Override
+	public void onLoggedOut() {
+		Log.d(TAG, "User logged out");
+	}
+
+	@Override
+	public void onLoginFailed(Throwable error) {
+		Log.d(TAG, "Login failed");
+	}
+
+	@Override
+	public void onTemporaryError() {
+		Log.d(TAG, "Temporary error occurred");
+	}
+
+	@Override
+	public void onConnectionMessage(String message) {
+		Log.d(TAG, "Received connection message: " + message);
+	}
+
+	@Override
+	public void onPlaybackEvent(EventType eventType, PlayerState playerState) {
+		Log.d(TAG, "Playback event received: " + eventType.name());
+		switch (eventType) {
+			// Handle event type as necessary
+			default:
+				break;
+		}
+	}
+
+	@Override
+	public void onPlaybackError(ErrorType errorType, String errorDetails) {
+		Log.d(TAG, "Playback error received: " + errorType.name());
+		switch (errorType) {
+			// Handle error type as necessary
+			default:
+				break;
+		}
 	}
 
 	@Override
@@ -531,10 +628,12 @@ public class DeviceControlActivity extends Activity {
 								new HTTPLifxAsyncTask(0, 64, 0, 10).execute();
 								mCntAfterTrigger = 0;
 								isStress = true;
+								mPlayer.play("spotify:user:1222611202:playlist:74YxeWm2dyIr65pufsJEND");
 							} else if (aggVal >= 40 && isStress && mCntAfterTrigger >= 40 && mR2RSeries.size() > MAX_R2R_SERIES_SIZE/2){
 								new HTTPLifxAsyncTask(64, 64, 64, 10).execute();
 								mCntAfterTrigger = 0;
 								isStress = false;
+								mPlayer.pause();
 							}
 							
 							mCntAfterTrigger++;
